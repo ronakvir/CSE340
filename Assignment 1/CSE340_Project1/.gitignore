@@ -1,3 +1,4 @@
 *.vscode
 a.out
-CSE340_Ubunutu_Guide.docx
+CSE340_Ubuntu_Guide.docx
+*.DS_Store
