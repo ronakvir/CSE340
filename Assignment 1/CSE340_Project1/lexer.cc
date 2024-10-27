@@ -20,11 +20,29 @@ string reserved[] = { "END_OF_FILE",
     "EQUAL", "COLON", "COMMA", "SEMICOLON",
     "LBRAC", "RBRAC", "LPAREN", "RPAREN",
     "NOTEQUAL", "GREATER", "LESS", "LTEQ", "GTEQ",
-    "DOT", "NUM", "ID", "ERROR" // TODO: Add labels for new token types here (as string)
+    "DOT", "NUM", "ID",  "REALNUM", "BASE08NUM", "BASE16NUM","ERROR"
 };
 
 #define KEYWORDS_COUNT 5
+#define NUMTYPE_COUNT 3
 string keyword[] = { "IF", "WHILE", "DO", "THEN", "PRINT" };
+
+const string DOTSTRING = ".";
+const string BASE08STRING = "x08";
+const string BASE16STRING = "x16";
+const string EMPTYSTRING = "";
+
+struct NumberType {
+    const string validate_string;
+    int base;
+    TokenType tokenType;
+};
+
+static const NumberType numberTypes[] = {
+    { DOTSTRING, 10, REALNUM },
+    { BASE08STRING, 8, BASE08NUM },
+    { BASE16STRING, 16, BASE16NUM },
+};
 
 void Token::Print()
 {
@@ -36,7 +54,7 @@ void Token::Print()
 LexicalAnalyzer::LexicalAnalyzer()
 {
     this->line_no = 1;
-    tmp.lexeme = "";
+    tmp.lexeme = EMPTYSTRING;
     tmp.line_no = 1;
     tmp.token_type = ERROR;
 }
@@ -81,37 +99,178 @@ TokenType LexicalAnalyzer::FindKeywordIndex(string s)
     return ERROR;
 }
 
-Token LexicalAnalyzer::ScanNumber()
+bool LexicalAnalyzer::verifyPatternMatch(const string& s) 
 {
     char c;
+    string collected_chars;
+
+    for (int i = 0; i < s.length(); ++i) {
+        char expectedChar = s[i];
+
+        if (input.EndOfInput()) {
+            input.UngetString(collected_chars);
+            return false;
+        }
+
+        input.GetChar(c);
+        collected_chars += c;
+
+        if (c != expectedChar) {
+            input.UngetString(collected_chars);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+bool isDigitInBase(char c, int base = 10) {
+    if (base <= 10) {
+        return c >= '0' && c < '0' + base;
+    } else {
+        return (c >= '0' && c <= '9') || (toupper(c) >= 'A' && toupper(c) < 'A' + base - 10);
+    }
+}
+
+bool isPositiveDigitInBase(char c, int base = 10) {
+    if (base <= 10) {
+        return c >= '1' && c < '0' + base;
+    } else {
+        return (c >= '1' && c <= '9') || (toupper(c) >= 'A' && toupper(c) < 'A' + base - 10);
+    }
+}
+
+Token LexicalAnalyzer::ScanNumber() 
+{
+    string lexeme;
+
+    tmp.lexeme = EMPTYSTRING;
+    tmp.token_type = ERROR;
+    tmp.line_no = line_no;
+
+    for (int i = 0; i < NUMTYPE_COUNT; i++) {
+        const NumberType numberType = numberTypes[i];
+        lexeme = matchToBase(numberType.validate_string, numberType.base);
+        if (!lexeme.empty()) {
+            tmp.lexeme = lexeme;
+            tmp.token_type = numberType.tokenType;
+            return tmp;
+        }
+    }
+
+    lexeme = checkAndReturnNum();
+    if (!lexeme.empty()) {
+        tmp.lexeme = lexeme;
+        tmp.token_type = NUM;
+        return tmp;
+    }
+
+    return tmp;
+}
+
+string LexicalAnalyzer::checkAndReturnNum()
+{
+    char c;
+    string scanned = EMPTYSTRING;
 
     input.GetChar(c);
+    scanned += c;
     if (isdigit(c)) {
         if (c == '0') {
-            tmp.lexeme = "0";
+            return scanned;
         } else {
-            tmp.lexeme = "";
+            input.GetChar(c);
             while (!input.EndOfInput() && isdigit(c)) {
-                tmp.lexeme += c;
+                scanned += c;
                 input.GetChar(c);
             }
             if (!input.EndOfInput()) {
                 input.UngetChar(c);
             }
+            return scanned;
         }
-        // TODO: You can check for REALNUM, BASE08NUM and BASE16NUM here!
-        tmp.token_type = NUM;
-        tmp.line_no = line_no;
-        return tmp;
-    } else {
-        if (!input.EndOfInput()) {
-            input.UngetChar(c);
+    } 
+    input.UngetString(scanned);
+    return EMPTYSTRING;
+}
+
+string LexicalAnalyzer::matchToBase(const string& validate_string, int base)
+{
+    char c; 
+    string scanned = EMPTYSTRING;
+    input.GetChar(c);
+    scanned += c;   
+
+    if (c == '0') {
+        if (!verifyPatternMatch(validate_string)) {
+            input.UngetString(scanned);
+            return EMPTYSTRING;
         }
-        tmp.lexeme = "";
-        tmp.token_type = ERROR;
-        tmp.line_no = line_no;
-        return tmp;
+        scanned += validate_string;
+
+        if (validate_string != DOTSTRING)
+            return scanned;
+
+        input.GetChar(c);
+        while (!input.EndOfInput() && c == '0') {
+            scanned += c;
+            input.GetChar(c);
+
+            if (c == '\n') {
+                scanned += c;
+                input.UngetString(scanned);
+                return EMPTYSTRING;
+            }
+        }
+
+        if (!input.EndOfInput() && isPositiveDigitInBase(c, base)) {
+            while (!input.EndOfInput() && isDigitInBase(c, base)) {
+                scanned += c; 
+                input.GetChar(c);
+            }
+            if (!input.EndOfInput())
+                input.UngetChar(c);
+        }
+
+        return scanned;
     }
+
+    if (isPositiveDigitInBase(c, base)) {
+        input.GetChar(c);
+        while (!input.EndOfInput() && isDigitInBase(c, base)) {
+            scanned += c;
+            input.GetChar(c);
+        }
+        if (!input.EndOfInput())
+            input.UngetChar(c);
+
+        if (!verifyPatternMatch(validate_string)) {
+            input.UngetString(scanned);
+            return EMPTYSTRING;
+        }
+
+        scanned += validate_string;
+
+        if (validate_string != DOTSTRING) 
+            return scanned;
+
+        input.GetChar(c);
+        bool after_dot_flag = false;
+        while (!input.EndOfInput() && isDigitInBase(c, base)) {
+            after_dot_flag = true;
+            scanned += c;
+            input.GetChar(c);
+        }
+        if (!input.EndOfInput()) 
+            input.UngetChar(c);
+
+        if (after_dot_flag)
+            return scanned;
+    }
+
+    input.UngetString(scanned);
+    return EMPTYSTRING;
 }
 
 Token LexicalAnalyzer::ScanIdOrKeyword()
@@ -120,7 +279,7 @@ Token LexicalAnalyzer::ScanIdOrKeyword()
     input.GetChar(c);
 
     if (isalpha(c)) {
-        tmp.lexeme = "";
+        tmp.lexeme = EMPTYSTRING;
         while (!input.EndOfInput() && isalnum(c)) {
             tmp.lexeme += c;
             input.GetChar(c);
@@ -137,28 +296,12 @@ Token LexicalAnalyzer::ScanIdOrKeyword()
         if (!input.EndOfInput()) {
             input.UngetChar(c);
         }
-        tmp.lexeme = "";
+        tmp.lexeme = EMPTYSTRING;
         tmp.token_type = ERROR;
     }
     return tmp;
 }
 
-// you should unget tokens in the reverse order in which they
-// are obtained. If you execute
-//
-//    t1 = lexer.GetToken();
-//    t2 = lexer.GetToken();
-//    t3 = lexer.GetToken();
-//
-// in this order, you should execute
-//
-//    lexer.UngetToken(t3);
-//    lexer.UngetToken(t2);
-//    lexer.UngetToken(t1);
-//
-// if you want to unget all three tokens. Note that it does not
-// make sense to unget t1 without first ungetting t2 and t3
-//
 TokenType LexicalAnalyzer::UngetToken(Token tok)
 {
     tokens.push_back(tok);;
@@ -169,9 +312,6 @@ Token LexicalAnalyzer::GetToken()
 {
     char c;
 
-    // if there are tokens that were previously
-    // stored due to UngetToken(), pop a token and
-    // return it without reading from input
     if (!tokens.empty()) {
         tmp = tokens.back();
         tokens.pop_back();
@@ -179,7 +319,7 @@ Token LexicalAnalyzer::GetToken()
     }
 
     SkipSpace();
-    tmp.lexeme = "";
+    tmp.lexeme = EMPTYSTRING;
     tmp.line_no = line_no;
     input.GetChar(c);
     switch (c) {
